@@ -186,6 +186,13 @@ class StatusChangeTests(AppointmentAPITestCase):
         self.assertIn("10:30", slots)
         self.assertEqual(self.book().status_code, 201)
 
+    def test_completed_keeps_the_slot(self):
+        self.assertEqual(self.patch_status("completed").status_code, 200)
+
+        slots = self.client.get(SLOTS_URL, {"doctor": 1, "date": self.day}).data["slots"]
+        self.assertNotIn("10:30", slots)
+        self.assertEqual(self.book().status_code, 400)
+
     def test_final_states_cannot_change(self):
         self.assertEqual(self.patch_status("completed").status_code, 200)
         self.assert_rule_error(

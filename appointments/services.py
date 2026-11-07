@@ -35,10 +35,11 @@ def _overlaps(start_a: datetime, end_a: datetime, start_b: datetime, end_b: date
     return start_a < end_b and start_b < end_a
 
 
-def _active_appointments(doctor_id: int, day: date) -> list[Appointment]:
+def _occupying_appointments(doctor_id: int, day: date) -> list[Appointment]:
+    """Appointments that hold the doctor's time: booked and completed. Only cancelling frees a slot."""
     return [
         a for a in store.all()
-        if a.doctor_id == doctor_id and a.date == day and a.is_active
+        if a.doctor_id == doctor_id and a.date == day and a.occupies_time
     ]
 
 
@@ -61,7 +62,7 @@ def _check_clinic_hours(day: date, start_time: time, duration_minutes: int) -> N
 def _check_doctor_is_free(doctor_id: int, day: date, start_time: time, duration_minutes: int) -> None:
     starts_at = datetime.combine(day, start_time)
     ends_at = starts_at + timedelta(minutes=duration_minutes)
-    for existing in _active_appointments(doctor_id, day):
+    for existing in _occupying_appointments(doctor_id, day):
         if _overlaps(starts_at, ends_at, existing.starts_at, existing.ends_at):
             raise BookingRuleError(
                 f"{existing.doctor.name} already has an appointment at "
@@ -200,7 +201,7 @@ def doctor_day(doctor_id: int, day: date) -> DoctorDay:
         return DoctorDay(doctor=get_doctor(doctor_id), date=day, is_open=False, slots=[])
 
     occupying = sorted(
-        (a for a in store.all() if a.doctor_id == doctor_id and a.date == day and a.occupies_time),
+        _occupying_appointments(doctor_id, day),
         key=lambda a: (a.start_time, a.id),
     )
     current = _local_now()

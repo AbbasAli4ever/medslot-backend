@@ -114,7 +114,7 @@ curl -X POST localhost:8000/api/appointments/ -H "Authorization: Bearer $TOKEN" 
 
 1. Open Monday to Saturday, 09:00 to 17:00. The appointment must start at or after 09:00 and end by 17:00.
 2. Start times are on a 15-minute boundary (:00, :15, :30, :45). Durations are 15, 30, 45 or 60 minutes (default 30).
-3. A doctor can't have overlapping `booked` appointments. Cancelled and completed ones don't block a slot.
+3. A doctor can't have overlapping appointments. Booked and completed ones hold their time; only cancelling frees a slot.
 4. No booking in the past, including earlier today. Time is local to `Asia/Karachi`.
 5. Only a `booked` appointment can become `cancelled` or `completed`. Both are final.
 6. `patient_phone` is 10 to 13 digits. `patient_name` is required. `doctor` is 1, 2 or 3.
