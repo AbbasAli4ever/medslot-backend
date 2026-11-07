@@ -4,6 +4,54 @@ Django REST Framework backend for booking, listing, cancelling and completing cl
 
 The Next.js frontend lives in a separate repo: https://github.com/AbbasAli4ever/medslot-frontend
 
+## Quick start: run both apps
+
+Clone both repos side by side:
+
+```bash
+git clone https://github.com/AbbasAli4ever/medslot-backend.git backend
+git clone https://github.com/AbbasAli4ever/medslot-frontend.git frontend
+```
+
+**First time only**
+
+```bash
+# backend
+cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# frontend (new terminal)
+cd frontend
+npm install
+cp .env.example .env.local   # NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api
+```
+
+**Every time**, in two terminals:
+
+```bash
+# Terminal 1: backend, http://localhost:8000
+cd backend
+source .venv/bin/activate
+python manage.py runserver 8000
+```
+
+```bash
+# Terminal 2: frontend, http://localhost:3000
+cd frontend
+npm run dev
+```
+
+Then open:
+
+- App: http://localhost:3000 (click **Continue with demo account**, or log in with `staff@medslot.app` / `medslot123`)
+- Swagger: http://localhost:8000/api/docs/ (call `POST /api/auth/login/`, then click **Authorize** and paste the token)
+
+**Troubleshooting**
+
+- "Port already in use": stop the old process with `lsof -ti tcp:8000 | xargs kill` (backend) or `lsof -ti tcp:3000 | xargs kill` (frontend).
+- To clear all appointments, restart the backend (Ctrl+C, then `runserver` again). Data is kept in memory only.
+
 ## Run
 
 ```bash
