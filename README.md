@@ -18,6 +18,26 @@ Optional environment variables are listed in `.env.example`. No migrations are n
 - Swagger UI: http://127.0.0.1:8000/api/docs/
 - OpenAPI schema: http://127.0.0.1:8000/api/schema/
 
+## Run with Docker
+
+`docker-compose.yml` starts both apps. The backend and frontend are separate repos, so clone them side by side:
+
+```bash
+mkdir medslot && cd medslot
+git clone https://github.com/AbbasAli4ever/medslot-backend.git backend
+git clone https://github.com/AbbasAli4ever/medslot-frontend.git frontend
+cd backend
+docker compose up --build
+```
+
+- API on http://localhost:8000 (Swagger at `/api/docs/`), web app on http://localhost:3000.
+- The frontend is built from `../frontend` by default. Point elsewhere with `FRONTEND_DIR=/path/to/frontend docker compose up --build`.
+- `web` is built with `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api`, because the browser calls the API from the host.
+- `api` reads `DJANGO_ALLOWED_HOSTS` and `CORS_ALLOWED_ORIGINS` from the environment (set in the compose file).
+- API only: `docker compose up --build api`.
+- The API container runs Django's `runserver --noreload` on purpose. The store is in memory, so it must be a single
+  process; a multi-worker server would give each worker its own data. Data resets when the container restarts.
+
 ## Tests
 
 ```bash
@@ -109,6 +129,19 @@ Every 4xx response has a human-readable `detail` string. Field validation errors
 {"detail": "Appointment 99 not found."}
 ```
 
+## What's finished
+
+All core requirements, plus every bonus item:
+
+- [x] Booking, listing, cancelling and completing appointments, with all clinic rules enforced server-side
+- [x] Staff login (signed Bearer tokens) for booking and status changes; reads stay public
+- [x] Pagination on the appointment list (`page`, `page_size`)
+- [x] Search by patient name or phone
+- [x] Tests (`python manage.py test`): rules, status changes, filters, pagination, doctor's day, auth
+- [x] Doctor's day view (`/api/appointments/doctor-day/`)
+- [x] Docker Compose for both apps
+- [x] Swagger / OpenAPI docs at `/api/docs/`, validated with `spectacular --validate --fail-on-warn`
+
 ## Storage
 
 There is no database, by design. Appointments are kept in a thread-safe, in-memory store
@@ -129,4 +162,5 @@ appointments/
   staff.py        staff account (from settings) and signed login tokens
   authentication.py  Bearer token DRF authentication and its Swagger scheme
   tests.py        API tests
+Dockerfile, docker-compose.yml   container setup for the API and both apps
 ```

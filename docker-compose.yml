@@ -1,0 +1,29 @@
+# Runs both Medslot apps. The backend and frontend are separate repos, cloned
+# side by side:
+#   medslot/
+#     backend/   (this repo, medslot-backend)
+#     frontend/  (medslot-frontend)
+# Override the frontend location with FRONTEND_DIR=/path/to/frontend.
+#
+#   docker compose up --build
+#   API: http://localhost:8000/api/docs/   Web: http://localhost:3000
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,api
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+
+  web:
+    build:
+      context: ${FRONTEND_DIR:-../frontend}
+      args:
+        # Baked into the browser bundle: the browser calls the API from the host.
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
