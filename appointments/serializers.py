@@ -1,0 +1,148 @@
+"""Request validation and response shapes for the appointments API."""
+
+from django.core.validators import RegexValidator
+from rest_framework import serializers
+
+from .doctors import DOCTOR_CHOICES
+from .models import DEFAULT_DURATION, DURATION_CHOICES, Status
+
+TIME_FORMAT = "%H:%M"
+DATE_FORMAT = "%Y-%m-%d"
+
+DOCTOR_ERRORS = {"invalid_choice": "Unknown doctor. Choose one of: 1, 2, 3."}
+DATE_ERRORS = {"invalid": "Date must be in YYYY-MM-DD format."}
+
+
+class DoctorSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    specialty = serializers.CharField()
+
+
+class AppointmentSerializer(serializers.Serializer):
+    """Booking input and the full appointment output."""
+
+    id = serializers.IntegerField(read_only=True)
+    doctor = serializers.ChoiceField(
+        source="doctor_id", choices=DOCTOR_CHOICES, error_messages=DOCTOR_ERRORS
+    )
+    doctor_detail = DoctorSerializer(source="doctor", read_only=True)
+    patient_name = serializers.CharField(
+        max_length=100,
+        error_messages={
+            "required": "Patient name is required.",
+            "blank": "Patient name is required.",
+        },
+    )
+    patient_phone = serializers.CharField(
+        validators=[
+            RegexValidator(
+                r"^\d{10,13}$",
+                "Phone number must contain digits only and be 10 to 13 characters long.",
+            )
+        ],
+        error_messages={
+            "required": "Phone number is required.",
+            "blank": "Phone number is required.",
+        },
+    )
+    date = serializers.DateField(
+        format=DATE_FORMAT, input_formats=[DATE_FORMAT], error_messages=DATE_ERRORS
+    )
+    start_time = serializers.TimeField(
+        format=TIME_FORMAT,
+        input_formats=[TIME_FORMAT],
+        error_messages={"invalid": "Start time must be in HH:MM format."},
+    )
+    duration_minutes = serializers.ChoiceField(
+        choices=DURATION_CHOICES,
+        default=DEFAULT_DURATION,
+        error_messages={"invalid_choice": "Duration must be 15, 30, 45 or 60 minutes."},
+    )
+    end_time = serializers.TimeField(format=TIME_FORMAT, read_only=True)
+    reason = serializers.CharField(
+        max_length=500, required=False, allow_blank=True, default=""
+    )
+    status = serializers.ChoiceField(choices=Status.choices, read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
+class AppointmentStatusUpdateSerializer(serializers.Serializer):
+    """PATCH body: only ``status`` may change, and only to cancelled or completed."""
+
+    status = serializers.ChoiceField(
+        choices=[Status.CANCELLED, Status.COMPLETED],
+        error_messages={
+            "invalid_choice": 'Status can only be changed to "cancelled" or "completed".'
+        },
+    )
+
+    def validate(self, attrs):
+        unknown = sorted(set(self.initial_data) - set(self.fields))
+        if unknown:
+            raise serializers.ValidationError(
+                {field: ["Only the status of an appointment can be changed."] for field in unknown}
+            )
+        return attrs
+
+
+class AppointmentFilterSerializer(serializers.Serializer):
+    """Optional query filters for the appointment list."""
+
+    doctor = serializers.ChoiceField(
+        choices=DOCTOR_CHOICES, required=False, error_messages=DOCTOR_ERRORS
+    )
+    date = serializers.DateField(
+        input_formats=[DATE_FORMAT], required=False, error_messages=DATE_ERRORS
+    )
+    status = serializers.ChoiceField(
+        choices=Status.choices,
+        required=False,
+        error_messages={"invalid_choice": "Status must be booked, completed or cancelled."},
+    )
+    search = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class AvailableSlotsQuerySerializer(serializers.Serializer):
+    doctor = serializers.ChoiceField(
+        choices=DOCTOR_CHOICES,
+        error_messages={**DOCTOR_ERRORS, "required": "The doctor query parameter is required."},
+    )
+    date = serializers.DateField(
+        input_formats=[DATE_FORMAT],
+        error_messages={**DATE_ERRORS, "required": "The date query parameter is required."},
+    )
+
+
+class AvailableSlotsSerializer(serializers.Serializer):
+    doctor = DoctorSerializer()
+    date = serializers.DateField(format=DATE_FORMAT)
+    slots = serializers.ListField(child=serializers.CharField(), help_text="Free start times, HH:MM.")
+
+
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField(error_messages={"required": "Email is required.", "blank": "Email is required."})
+    password = serializers.CharField(
+        trim_whitespace=False,
+        style={"input_type": "password"},
+        error_messages={"required": "Password is required.", "blank": "Password is required."},
+    )
+
+
+class StaffUserSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    name = serializers.CharField()
+
+
+class LoginResponseSerializer(serializers.Serializer):
+    token = serializers.CharField(help_text="Send as `Authorization: Bearer <token>`. Valid for 12 hours by default.")
+    user = StaffUserSerializer()
+
+
+class ErrorSerializer(serializers.Serializer):
+    detail = serializers.CharField(help_text="Human-readable message, safe to show to users.")
+    errors = serializers.DictField(
+        child=serializers.ListField(child=serializers.CharField()),
+        required=False,
+        help_text="Per-field validation messages (validation errors only).",
+    )
