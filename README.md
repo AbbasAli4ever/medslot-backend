@@ -2,6 +2,8 @@
 
 Django REST Framework backend for booking, listing, cancelling and completing clinic appointments.
 
+The Next.js frontend lives in a separate repo: https://github.com/AbbasAli4ever/medslot-frontend
+
 ## Run
 
 ```bash
