@@ -20,6 +20,7 @@ from .serializers import (
     AppointmentStatusUpdateSerializer,
     AvailableSlotsQuerySerializer,
     AvailableSlotsSerializer,
+    DoctorDaySerializer,
     DoctorSerializer,
     ErrorSerializer,
     LoginResponseSerializer,
@@ -190,8 +191,9 @@ class AvailableSlotsView(APIView):
         tags=["Appointments"],
         summary="Available 30-minute slots",
         description=(
-            "Free 30-minute start times between 09:00 and 16:30 for one doctor on one date. "
-            "Slots already in the past are left out, so a past date or a Sunday returns an empty list."
+            "Free 30-minute start times between 09:00 and 16:30 for one doctor on one date: the "
+            "`free` slots of the doctor's day view. Slots overlapping a booked or completed appointment "
+            "and slots already in the past are left out, so a past date or a Sunday returns an empty list."
         ),
         parameters=[doctor_param(required=True), date_param(required=True)],
         responses={200: AvailableSlotsSerializer, 400: ErrorSerializer},
@@ -210,6 +212,54 @@ class AvailableSlotsView(APIView):
                 }
             ).data
         )
+
+
+class DoctorDayView(APIView):
+    @extend_schema(
+        tags=["Appointments"],
+        summary="Doctor's day view",
+        description=(
+            "Every 30-minute slot from 09:00 to 16:30 for one doctor on one date. A slot is `booked` "
+            "when a booked or completed appointment overlaps it (a 60-minute appointment covers two "
+            "slots, both referencing it); cancelled appointments leave it free. A free slot that has "
+            "already started is `past`. On Sundays `is_open` is false and `slots` is empty."
+        ),
+        parameters=[doctor_param(required=True), date_param(required=True)],
+        responses={200: DoctorDaySerializer, 400: ErrorSerializer},
+        examples=[
+            OpenApiExample(
+                "Day with one booking",
+                response_only=True,
+                value={
+                    "doctor": {"id": 1, "name": "Dr. Ali", "specialty": "Cardiology"},
+                    "date": "2026-11-10",
+                    "is_open": True,
+                    "summary": {"free": 15, "booked": 1, "past": 0},
+                    "slots": [
+                        {"start": "09:00", "end": "09:30", "status": "free", "appointment": None},
+                        {
+                            "start": "09:30",
+                            "end": "10:00",
+                            "status": "booked",
+                            "appointment": {
+                                "id": 4,
+                                "patient_name": "Ayesha Khan",
+                                "start_time": "09:30",
+                                "end_time": "10:00",
+                                "duration_minutes": 30,
+                                "status": "booked",
+                            },
+                        },
+                    ],
+                },
+            ),
+        ],
+    )
+    def get(self, request: Request) -> Response:
+        query = AvailableSlotsQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        day = services.doctor_day(query.validated_data["doctor"], query.validated_data["date"])
+        return Response(DoctorDaySerializer(day).data)
 
 
 class LoginView(APIView):

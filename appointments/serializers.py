@@ -4,7 +4,7 @@ from django.core.validators import RegexValidator
 from rest_framework import serializers
 
 from .doctors import DOCTOR_CHOICES
-from .models import DEFAULT_DURATION, DURATION_CHOICES, Status
+from .models import DEFAULT_DURATION, DURATION_CHOICES, SlotStatus, Status
 from .services import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 TIME_FORMAT = "%H:%M"
@@ -133,6 +133,8 @@ class AppointmentPageSerializer(serializers.Serializer):
 
 
 class AvailableSlotsQuerySerializer(serializers.Serializer):
+    """Required ``doctor`` and ``date`` query params (available slots and the doctor's day)."""
+
     doctor = serializers.ChoiceField(
         choices=DOCTOR_CHOICES,
         error_messages={**DOCTOR_ERRORS, "required": "The doctor query parameter is required."},
@@ -147,6 +149,41 @@ class AvailableSlotsSerializer(serializers.Serializer):
     doctor = DoctorSerializer()
     date = serializers.DateField(format=DATE_FORMAT)
     slots = serializers.ListField(child=serializers.CharField(), help_text="Free start times, HH:MM.")
+
+
+class DaySlotAppointmentSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    patient_name = serializers.CharField()
+    start_time = serializers.TimeField(format=TIME_FORMAT)
+    end_time = serializers.TimeField(format=TIME_FORMAT)
+    duration_minutes = serializers.IntegerField()
+    status = serializers.ChoiceField(choices=[Status.BOOKED, Status.COMPLETED])
+
+
+class DaySlotSerializer(serializers.Serializer):
+    start = serializers.TimeField(format=TIME_FORMAT, help_text="Slot start, HH:MM.")
+    end = serializers.TimeField(format=TIME_FORMAT, help_text="Slot end, HH:MM.")
+    status = serializers.ChoiceField(
+        choices=SlotStatus.choices,
+        help_text="`booked` if a booked or completed appointment overlaps it; `past` if free but already started.",
+    )
+    appointment = DaySlotAppointmentSerializer(
+        allow_null=True, help_text="The appointment occupying this slot, or null."
+    )
+
+
+class DaySummarySerializer(serializers.Serializer):
+    free = serializers.IntegerField()
+    booked = serializers.IntegerField()
+    past = serializers.IntegerField()
+
+
+class DoctorDaySerializer(serializers.Serializer):
+    doctor = DoctorSerializer()
+    date = serializers.DateField(format=DATE_FORMAT)
+    is_open = serializers.BooleanField(help_text="False on Sundays, when `slots` is empty.")
+    summary = DaySummarySerializer()
+    slots = DaySlotSerializer(many=True)
 
 
 class LoginSerializer(serializers.Serializer):

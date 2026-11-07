@@ -23,6 +23,14 @@ class Status(TextChoices):
     CANCELLED = "cancelled", "Cancelled"
 
 
+class SlotStatus(TextChoices):
+    """State of a 30-minute slot in a doctor's day."""
+
+    FREE = "free", "Free"
+    BOOKED = "booked", "Booked"
+    PAST = "past", "Past"
+
+
 @dataclass(frozen=True)
 class Appointment:
     id: int
@@ -55,3 +63,8 @@ class Appointment:
     @property
     def is_active(self) -> bool:
         return self.status == Status.BOOKED
+
+    @property
+    def occupies_time(self) -> bool:
+        """Booked and completed appointments use the doctor's time; cancelled ones don't."""
+        return self.status != Status.CANCELLED

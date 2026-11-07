@@ -36,7 +36,8 @@ python manage.py spectacular --validate --fail-on-warn --file /dev/null   # sche
 | POST | `/api/appointments/` | Book an appointment (201). **Staff login required** |
 | GET | `/api/appointments/{id}/` | One appointment (404 if missing) |
 | PATCH | `/api/appointments/{id}/` | `{"status": "cancelled"}` or `{"status": "completed"}`. **Staff login required** |
-| GET | `/api/appointments/available-slots/?doctor=1&date=YYYY-MM-DD` | Free 30-minute slots, 09:00 to 16:30 |
+| GET | `/api/appointments/available-slots/?doctor=1&date=YYYY-MM-DD` | Free 30-minute start times, 09:00 to 16:30 (the `free` slots of the day view) |
+| GET | `/api/appointments/doctor-day/?doctor=1&date=YYYY-MM-DD` | Doctor's day: every 30-minute slot with its status and appointment |
 
 The list is always paginated. Filters and sorting apply first, then the page is cut:
 
@@ -47,6 +48,22 @@ The list is always paginated. Filters and sorting apply first, then the page is 
 `total_pages` is at least 1, so no matches gives `{"count": 0, "page": 1, ..., "results": []}`.
 A page past `total_pages` returns `404 {"detail": "Page 5 does not exist."}`. A bad `page` or
 `page_size` returns 400 with field `errors`.
+
+The doctor's day view lists all 16 slots (09:00 to 16:30) for one doctor and date:
+
+```json
+{"doctor": {"id": 1, "name": "Dr. Ali", "specialty": "Cardiology"}, "date": "2026-11-10", "is_open": true,
+ "summary": {"free": 13, "booked": 2, "past": 1},
+ "slots": [{"start": "09:00", "end": "09:30", "status": "past", "appointment": null},
+           {"start": "09:30", "end": "10:00", "status": "booked",
+            "appointment": {"id": 4, "patient_name": "Ayesha Khan", "start_time": "09:30", "end_time": "10:30",
+                            "duration_minutes": 60, "status": "booked"}}]}
+```
+
+- `booked`: a booked or completed appointment overlaps the slot (completed ones show `appointment.status: "completed"`).
+  A 60-minute appointment covers two slots and both reference it. Cancelled appointments leave the slot free.
+- `past`: free, but the slot has already started (earlier today, or any slot on a past date).
+- Sunday: `is_open: false` and `slots: []`. Both `doctor` and `date` are required (400 otherwise).
 
 Example booking body:
 

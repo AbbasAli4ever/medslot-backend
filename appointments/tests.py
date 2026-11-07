@@ -11,6 +11,7 @@ from .store import store
 
 LIST_URL = "/api/appointments/"
 SLOTS_URL = "/api/appointments/available-slots/"
+DAY_URL = "/api/appointments/doctor-day/"
 LOGIN_URL = "/api/auth/login/"
 ME_URL = "/api/auth/me/"
 
@@ -375,6 +376,105 @@ class DoctorAndSlotTests(AppointmentAPITestCase):
                 self.assertIsInstance(response.data["detail"], str)
 
 
+class DoctorDayTests(AppointmentAPITestCase):
+    def get_day(self, day=None, doctor=1):
+        response = self.client.get(DAY_URL, {"doctor": doctor, "date": (day or self.monday).isoformat()})
+        self.assertEqual(response.status_code, 200, response.data)
+        return response.data
+
+    def slot(self, body, start):
+        return next(s for s in body["slots"] if s["start"] == start)
+
+    def test_mixed_free_and_booked(self):
+        first = self.book(start_time="09:00").data["id"]
+        self.book(start_time="10:15", duration_minutes=15)  # inside the 10:00 slot
+        self.book(start_time="09:00", doctor=2)  # another doctor: not on this day view
+
+        body = self.get_day()
+
+        self.assertEqual(body["doctor"], {"id": 1, "name": "Dr. Ali", "specialty": "Cardiology"})
+        self.assertEqual(body["date"], self.day)
+        self.assertTrue(body["is_open"])
+        self.assertEqual(len(body["slots"]), 16)
+        self.assertEqual((body["slots"][0]["start"], body["slots"][0]["end"]), ("09:00", "09:30"))
+        self.assertEqual((body["slots"][-1]["start"], body["slots"][-1]["end"]), ("16:30", "17:00"))
+        self.assertEqual(body["summary"], {"free": 14, "booked": 2, "past": 0})
+
+        booked = self.slot(body, "09:00")
+        self.assertEqual(booked["status"], "booked")
+        self.assertEqual(
+            booked["appointment"],
+            {"id": first, "patient_name": "Ayesha Khan", "start_time": "09:00",
+             "end_time": "09:30", "duration_minutes": 30, "status": "booked"},
+        )
+        self.assertEqual(self.slot(body, "10:00")["appointment"]["start_time"], "10:15")
+        self.assertEqual(self.slot(body, "09:30"), {"start": "09:30", "end": "10:00", "status": "free", "appointment": None})
+
+    def test_free_slots_match_available_slots(self):
+        self.book(start_time="11:00", duration_minutes=45)
+        free = [s["start"] for s in self.get_day()["slots"] if s["status"] == "free"]
+        available = self.client.get(SLOTS_URL, {"doctor": 1, "date": self.day}).data["slots"]
+        self.assertEqual(free, available)
+
+    def test_sixty_minute_appointment_covers_two_slots(self):
+        appointment_id = self.book(start_time="14:00", duration_minutes=60).data["id"]
+        body = self.get_day()
+        for start in ("14:00", "14:30"):
+            with self.subTest(start=start):
+                slot = self.slot(body, start)
+                self.assertEqual(slot["status"], "booked")
+                self.assertEqual(slot["appointment"]["id"], appointment_id)
+                self.assertEqual(slot["appointment"]["end_time"], "15:00")
+        self.assertEqual(self.slot(body, "15:00")["status"], "free")
+        self.assertEqual(body["summary"]["booked"], 2)
+
+    def test_cancelled_is_free_and_completed_is_booked(self):
+        cancelled = self.book(start_time="10:00").data["id"]
+        completed = self.book(start_time="11:00").data["id"]
+        self.client.patch(f"{LIST_URL}{cancelled}/", {"status": "cancelled"}, format="json")
+        self.client.patch(f"{LIST_URL}{completed}/", {"status": "completed"}, format="json")
+
+        body = self.get_day()
+
+        self.assertEqual(self.slot(body, "10:00")["status"], "free")
+        self.assertIsNone(self.slot(body, "10:00")["appointment"])
+        self.assertEqual(self.slot(body, "11:00")["status"], "booked")
+        self.assertEqual(self.slot(body, "11:00")["appointment"]["status"], "completed")
+
+    def test_sunday_is_closed(self):
+        body = self.get_day(next_weekday(6))
+        self.assertFalse(body["is_open"])
+        self.assertEqual(body["slots"], [])
+        self.assertEqual(body["summary"], {"free": 0, "booked": 0, "past": 0})
+
+    def test_past_slots(self):
+        self.book(start_time="13:00")
+        self.freeze_now(self.monday, time(12, 10))
+
+        body = self.get_day()
+        self.assertEqual(self.slot(body, "11:30")["status"], "past")
+        self.assertEqual(self.slot(body, "12:00")["status"], "past")  # already started
+        self.assertEqual(self.slot(body, "12:30")["status"], "free")
+        self.assertEqual(self.slot(body, "13:00")["status"], "booked")
+        self.assertEqual(body["summary"], {"free": 8, "booked": 1, "past": 7})
+
+        # A whole past date: booked slots stay booked, everything else is past.
+        body = self.get_day(self.monday - timedelta(days=7))
+        self.assertTrue(body["is_open"])
+        self.assertEqual(body["summary"], {"free": 0, "booked": 0, "past": 16})
+
+    def test_requires_valid_params(self):
+        for params in ({}, {"doctor": 1}, {"date": self.day}, {"doctor": 9, "date": self.day},
+                       {"doctor": 1, "date": "tomorrow"}):
+            with self.subTest(params=params):
+                response = self.client.get(DAY_URL, params)
+                self.assertEqual(response.status_code, 400)
+                self.assertIsInstance(response.data["detail"], str)
+                self.assertIn("errors", response.data)
+        response = self.client.get(DAY_URL, {"date": self.day})
+        self.assertEqual(response.data["detail"], "The doctor query parameter is required.")
+
+
 class AuthTests(AppointmentAPITestCase):
     def setUp(self):
         super().setUp()
@@ -448,6 +548,7 @@ class AuthTests(AppointmentAPITestCase):
             (LIST_URL, {}),
             (f"{LIST_URL}{appointment_id}/", {}),
             (SLOTS_URL, {"doctor": 1, "date": self.day}),
+            (DAY_URL, {"doctor": 1, "date": self.day}),
         ):
             with self.subTest(url=url):
                 self.assertEqual(self.anonymous.get(url, params).status_code, 200)

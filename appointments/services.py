@@ -6,8 +6,9 @@ from datetime import date, datetime, time, timedelta
 
 from django.utils import timezone
 
+from .doctors import Doctor, get_doctor
 from .exceptions import AppointmentNotFound, BookingRuleError, PageNotFound
-from .models import Appointment, Status
+from .models import Appointment, SlotStatus, Status
 from .store import store
 
 OPENING_TIME = time(9, 0)
@@ -47,7 +48,7 @@ def _check_clinic_hours(day: date, start_time: time, duration_minutes: int) -> N
 
     if starts_at < _local_now():
         raise BookingRuleError("Appointments cannot be booked in the past.")
-    if day.weekday() == SUNDAY:
+    if not is_open(day):
         raise BookingRuleError("The clinic is closed on Sundays.")
     if start_time < OPENING_TIME or ends_at > datetime.combine(day, CLOSING_TIME):
         raise BookingRuleError("Appointments must be between 09:00 and 17:00.")
@@ -161,12 +162,47 @@ def paginate(items: list, page: int = 1, page_size: int = DEFAULT_PAGE_SIZE) -> 
     )
 
 
-def available_slots(doctor_id: int, day: date) -> list[time]:
-    """Free 30-minute slots (09:00 to 16:30) for a doctor, excluding any in the past."""
-    if day.weekday() == SUNDAY:
-        return []
+def is_open(day: date) -> bool:
+    return day.weekday() != SUNDAY
 
-    booked = _active_appointments(doctor_id, day)
+
+@dataclass(frozen=True)
+class DaySlot:
+    start: time
+    end: time
+    status: SlotStatus
+    appointment: Appointment | None = None
+
+
+@dataclass(frozen=True)
+class DoctorDay:
+    doctor: Doctor
+    date: date
+    is_open: bool
+    slots: list[DaySlot]
+
+    @property
+    def summary(self) -> dict[str, int]:
+        return {
+            choice: sum(1 for slot in self.slots if slot.status == choice)
+            for choice in SlotStatus.values
+        }
+
+
+def doctor_day(doctor_id: int, day: date) -> DoctorDay:
+    """Every 30-minute slot (09:00 to 16:30) for a doctor on one date.
+
+    A slot is ``booked`` if an appointment that occupies time (booked or completed)
+    overlaps it, and it references the first such appointment. A free slot that has
+    already started is ``past``. Sundays have no slots.
+    """
+    if not is_open(day):
+        return DoctorDay(doctor=get_doctor(doctor_id), date=day, is_open=False, slots=[])
+
+    occupying = sorted(
+        (a for a in store.all() if a.doctor_id == doctor_id and a.date == day and a.occupies_time),
+        key=lambda a: (a.start_time, a.id),
+    )
     current = _local_now()
     slot_length = timedelta(minutes=SLOT_LENGTH_MINUTES)
     slot_start = datetime.combine(day, OPENING_TIME)
@@ -175,8 +211,21 @@ def available_slots(doctor_id: int, day: date) -> list[time]:
     slots = []
     while slot_start + slot_length <= closing:
         slot_end = slot_start + slot_length
-        is_free = not any(_overlaps(slot_start, slot_end, a.starts_at, a.ends_at) for a in booked)
-        if slot_start >= current and is_free:
-            slots.append(slot_start.time())
+        appointment = next(
+            (a for a in occupying if _overlaps(slot_start, slot_end, a.starts_at, a.ends_at)),
+            None,
+        )
+        if appointment is not None:
+            slot_status = SlotStatus.BOOKED
+        elif slot_start < current:
+            slot_status = SlotStatus.PAST
+        else:
+            slot_status = SlotStatus.FREE
+        slots.append(DaySlot(slot_start.time(), slot_end.time(), slot_status, appointment))
         slot_start = slot_end
-    return slots
+    return DoctorDay(doctor=get_doctor(doctor_id), date=day, is_open=True, slots=slots)
+
+
+def available_slots(doctor_id: int, day: date) -> list[time]:
+    """Free 30-minute start times for a doctor: the ``free`` slots of their day view."""
+    return [slot.start for slot in doctor_day(doctor_id, day).slots if slot.status == SlotStatus.FREE]
