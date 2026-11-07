@@ -12,8 +12,10 @@ from . import services, staff
 from .doctors import DOCTORS, get_doctor
 from .exceptions import InvalidCredentials
 from .models import Status
+from .services import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from .serializers import (
     AppointmentFilterSerializer,
+    AppointmentPageSerializer,
     AppointmentSerializer,
     AppointmentStatusUpdateSerializer,
     AvailableSlotsQuerySerializer,
@@ -61,14 +63,32 @@ class AppointmentListCreateView(APIView):
     @extend_schema(
         tags=["Appointments"],
         summary="List appointments",
-        description="All appointments sorted by date, then start time. Every filter is optional.",
+        operation_id="appointments_list",
+        description=(
+            "Appointments sorted by date, then start time, one page at a time. Every filter is "
+            "optional and applies before paginating. Invalid `page` or `page_size` values return 400; "
+            "a page past `total_pages` returns 404."
+        ),
         parameters=[
             doctor_param(required=False),
             date_param(required=False),
             OpenApiParameter("status", OpenApiTypes.STR, enum=Status.values, description="Appointment status."),
             OpenApiParameter("search", OpenApiTypes.STR, description="Case-insensitive match on patient name or phone."),
+            OpenApiParameter("page", OpenApiTypes.INT, default=1, description="Page number, starting at 1."),
+            OpenApiParameter(
+                "page_size", OpenApiTypes.INT, default=DEFAULT_PAGE_SIZE,
+                description=f"Appointments per page, 1 to {MAX_PAGE_SIZE}.",
+            ),
         ],
-        responses={200: AppointmentSerializer(many=True), 400: ErrorSerializer},
+        responses={200: AppointmentPageSerializer, 400: ErrorSerializer, 404: ErrorSerializer},
+        examples=[
+            OpenApiExample(
+                "Page out of range",
+                response_only=True,
+                status_codes=["404"],
+                value={"detail": "Page 5 does not exist."},
+            ),
+        ],
     )
     def get(self, request: Request) -> Response:
         filters = AppointmentFilterSerializer(data=request.query_params)
@@ -80,7 +100,8 @@ class AppointmentListCreateView(APIView):
             status=params.get("status"),
             search=params["search"],
         )
-        return Response(AppointmentSerializer(appointments, many=True).data)
+        page = services.paginate(appointments, page=params["page"], page_size=params["page_size"])
+        return Response(AppointmentPageSerializer(page).data)
 
     @extend_schema(
         tags=["Appointments"],

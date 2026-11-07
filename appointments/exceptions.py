@@ -29,6 +29,11 @@ class AppointmentNotFound(NotFound):
         super().__init__(f"Appointment {appointment_id} not found.")
 
 
+class PageNotFound(NotFound):
+    def __init__(self, page: int):
+        super().__init__(f"Page {page} does not exist.")
+
+
 def _first_message(errors) -> str:
     if isinstance(errors, dict):
         return _first_message(next(iter(errors.values()), ""))

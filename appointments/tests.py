@@ -238,7 +238,7 @@ class ListTests(AppointmentAPITestCase):
     def ids(self, **params):
         response = self.client.get(LIST_URL, params)
         self.assertEqual(response.status_code, 200)
-        return [a["id"] for a in response.data]
+        return [a["id"] for a in response.data["results"]]
 
     def test_sorted_by_date_then_start_time(self):
         self.assertEqual(self.ids(), [2, 1, 3])
@@ -256,6 +256,80 @@ class ListTests(AppointmentAPITestCase):
                 response = self.client.get(LIST_URL, params)
                 self.assertEqual(response.status_code, 400)
                 self.assertIn(next(iter(params)), response.data["errors"])
+
+
+class PaginationTests(AppointmentAPITestCase):
+    def setUp(self):
+        super().setUp()
+        # 23 appointments for Dr. Ali on consecutive weekdays at 09:00 (ids follow date order),
+        # plus 3 for Dr. Sara to check that filters apply before paginating.
+        day = self.monday
+        for _ in range(23):
+            if day.weekday() == 6:
+                day += timedelta(days=1)
+            self.assertEqual(self.book(date=day.isoformat(), start_time="09:00").status_code, 201)
+            day += timedelta(days=1)
+        for start in ("11:00", "12:00", "13:00"):
+            self.book(doctor=2, start_time=start)
+
+    def get_page(self, **params):
+        return self.client.get(LIST_URL, params)
+
+    def test_default_page_size(self):
+        response = self.get_page()
+        self.assertEqual(response.status_code, 200)
+        body = response.data
+        self.assertEqual(
+            {k: body[k] for k in ("count", "page", "page_size", "total_pages")},
+            {"count": 26, "page": 1, "page_size": 10, "total_pages": 3},
+        )
+        self.assertEqual(len(body["results"]), 10)
+
+    def test_second_page_continues_the_sort(self):
+        first = self.get_page(page_size=5).data["results"]
+        second = self.get_page(page=2, page_size=5).data["results"]
+        self.assertEqual(len(second), 5)
+        everything = self.get_page(page_size=50).data["results"]
+        self.assertEqual([a["id"] for a in first + second], [a["id"] for a in everything[:10]])
+        keys = [(a["date"], a["start_time"]) for a in everything]
+        self.assertEqual(keys, sorted(keys))
+
+    def test_last_partial_page(self):
+        body = self.get_page(page=3).data
+        self.assertEqual(body["page"], 3)
+        self.assertEqual(body["total_pages"], 3)
+        self.assertEqual(len(body["results"]), 6)
+
+    def test_page_out_of_range_returns_404(self):
+        response = self.get_page(page=5)
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data, {"detail": "Page 5 does not exist."})
+
+    def test_empty_result_is_one_empty_page(self):
+        body = self.get_page(search="nobody-matches").data
+        self.assertEqual(body, {"count": 0, "page": 1, "page_size": 10, "total_pages": 1, "results": []})
+
+    def test_invalid_page_params_rejected(self):
+        for params in ({"page_size": 0}, {"page_size": 51}, {"page_size": "ten"},
+                       {"page": 0}, {"page": "abc"}):
+            with self.subTest(params=params):
+                response = self.get_page(**params)
+                self.assertEqual(response.status_code, 400)
+                field = next(iter(params))
+                self.assertIn(field, response.data["errors"])
+                self.assertEqual(response.data["detail"], response.data["errors"][field][0])
+
+    def test_filters_apply_before_paginating(self):
+        body = self.get_page(doctor=2, page_size=2).data
+        self.assertEqual((body["count"], body["total_pages"]), (3, 2))
+        self.assertTrue(all(a["doctor"] == 2 for a in body["results"]))
+
+        last = self.get_page(doctor=2, page_size=2, page=2).data["results"]
+        self.assertEqual([a["start_time"] for a in last], ["13:00"])
+
+        body = self.get_page(doctor=1, date=self.day).data
+        self.assertEqual(body["count"], 1)
+        self.assertEqual(self.get_page(doctor=2, page_size=2, page=3).status_code, 404)
 
 
 class DoctorAndSlotTests(AppointmentAPITestCase):

@@ -32,11 +32,21 @@ python manage.py spectacular --validate --fail-on-warn --file /dev/null   # sche
 | POST | `/api/auth/login/` | Staff login: `{email, password}` returns `{token, user}` |
 | GET | `/api/auth/me/` | The logged-in staff member (401 without a valid token) |
 | GET | `/api/doctors/` | The fixed list of doctors |
-| GET | `/api/appointments/` | List, sorted by date then start time. Filters: `doctor`, `date`, `status`, `search` (patient name or phone) |
+| GET | `/api/appointments/` | Paginated list, sorted by date then start time. Filters: `doctor`, `date`, `status`, `search` (patient name or phone). Paging: `page` (default 1), `page_size` (default 10, max 50) |
 | POST | `/api/appointments/` | Book an appointment (201). **Staff login required** |
 | GET | `/api/appointments/{id}/` | One appointment (404 if missing) |
 | PATCH | `/api/appointments/{id}/` | `{"status": "cancelled"}` or `{"status": "completed"}`. **Staff login required** |
 | GET | `/api/appointments/available-slots/?doctor=1&date=YYYY-MM-DD` | Free 30-minute slots, 09:00 to 16:30 |
+
+The list is always paginated. Filters and sorting apply first, then the page is cut:
+
+```json
+{"count": 26, "page": 1, "page_size": 10, "total_pages": 3, "results": [{"id": 1, "doctor": 1, "...": "..."}]}
+```
+
+`total_pages` is at least 1, so no matches gives `{"count": 0, "page": 1, ..., "results": []}`.
+A page past `total_pages` returns `404 {"detail": "Page 5 does not exist."}`. A bad `page` or
+`page_size` returns 400 with field `errors`.
 
 Example booking body:
 

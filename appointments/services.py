@@ -1,10 +1,12 @@
 """Clinic rules and appointment operations. Views stay thin and call these."""
 
+import math
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
 from django.utils import timezone
 
-from .exceptions import AppointmentNotFound, BookingRuleError
+from .exceptions import AppointmentNotFound, BookingRuleError, PageNotFound
 from .models import Appointment, Status
 from .store import store
 
@@ -13,6 +15,8 @@ CLOSING_TIME = time(17, 0)
 SLOT_BOUNDARY_MINUTES = 15
 SLOT_LENGTH_MINUTES = 30
 SUNDAY = 6
+DEFAULT_PAGE_SIZE = 10
+MAX_PAGE_SIZE = 50
 
 
 def now() -> datetime:
@@ -130,6 +134,31 @@ def list_appointments(
             if term in a.patient_name.lower() or term in a.patient_phone
         ]
     return sorted(appointments, key=lambda a: (a.date, a.start_time, a.id))
+
+
+@dataclass(frozen=True)
+class Page:
+    count: int
+    page: int
+    page_size: int
+    total_pages: int
+    results: list
+
+
+def paginate(items: list, page: int = 1, page_size: int = DEFAULT_PAGE_SIZE) -> Page:
+    """Slice ``items`` into one page. An empty list is still page 1 of 1."""
+    count = len(items)
+    total_pages = max(1, math.ceil(count / page_size))
+    if page > total_pages:
+        raise PageNotFound(page)
+    offset = (page - 1) * page_size
+    return Page(
+        count=count,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        results=items[offset:offset + page_size],
+    )
 
 
 def available_slots(doctor_id: int, day: date) -> list[time]:

@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from .doctors import DOCTOR_CHOICES
 from .models import DEFAULT_DURATION, DURATION_CHOICES, Status
+from .services import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 TIME_FORMAT = "%H:%M"
 DATE_FORMAT = "%Y-%m-%d"
@@ -87,7 +88,7 @@ class AppointmentStatusUpdateSerializer(serializers.Serializer):
 
 
 class AppointmentFilterSerializer(serializers.Serializer):
-    """Optional query filters for the appointment list."""
+    """Optional query filters and pagination for the appointment list."""
 
     doctor = serializers.ChoiceField(
         choices=DOCTOR_CHOICES, required=False, error_messages=DOCTOR_ERRORS
@@ -101,6 +102,34 @@ class AppointmentFilterSerializer(serializers.Serializer):
         error_messages={"invalid_choice": "Status must be booked, completed or cancelled."},
     )
     search = serializers.CharField(required=False, allow_blank=True, default="")
+    page = serializers.IntegerField(
+        min_value=1,
+        default=1,
+        error_messages={
+            "invalid": "Page must be a whole number.",
+            "min_value": "Page must be 1 or more.",
+        },
+    )
+    page_size = serializers.IntegerField(
+        min_value=1,
+        max_value=MAX_PAGE_SIZE,
+        default=DEFAULT_PAGE_SIZE,
+        error_messages={
+            "invalid": "Page size must be a whole number.",
+            "min_value": f"Page size must be between 1 and {MAX_PAGE_SIZE}.",
+            "max_value": f"Page size must be between 1 and {MAX_PAGE_SIZE}.",
+        },
+    )
+
+
+class AppointmentPageSerializer(serializers.Serializer):
+    """One page of the appointment list."""
+
+    count = serializers.IntegerField(help_text="Appointments matching the filters, across all pages.")
+    page = serializers.IntegerField(help_text="This page's number (1-based).")
+    page_size = serializers.IntegerField(help_text="Maximum appointments per page.")
+    total_pages = serializers.IntegerField(help_text="Number of pages; at least 1, even when count is 0.")
+    results = AppointmentSerializer(many=True)
 
 
 class AvailableSlotsQuerySerializer(serializers.Serializer):
